@@ -25,6 +25,8 @@ int LastWindTime = 0;
 int LastRainTime = 0;
 int WindTick = 0;
 int RainTick = 0;
+int WindDirection = 0;
+int LastWindDirection = 0;
 long Second = 0;
 long Minute = 0;
 long LastWind = 0;
@@ -38,7 +40,24 @@ float TempC = 0.0;        // Temp in Celsius
 float Pressure = 0.0;     // Temp in Pascals
 float Dewpoint = 0.0;     // Dewpoint in Farenheit
 float WindSpeed = 0.0;    // Wind speed MPH
+float WindGust = 0.0;
+
 float WindSpeedArray[60];
+float WindDirectionArray[60];
+
+char UploadURL[] = "weatherstation.wunderground.com";
+
+byte UploadIP[] = {
+  52, 22, 134, 222
+};
+// MAC address and IP for the Ethernet Shield, uses static IP on router
+byte mac[] = {
+  0xAA, 0xBB, 0xCC, 0xDD, 0x23, 0x35
+};
+IPAddress ip(192, 168, 1, 23);
+
+EthernetServer server(80);
+EthernetClient Client;
 
 
 void setup() {
@@ -49,6 +68,7 @@ void setup() {
  
   // Start BME280
   BME.begin();
+  SPI.begin();
 
   // Interrupts
   attachInterrupt(digitalPinToInterrupt(WSpeedPin), WindIRQ, FALLING);
@@ -61,13 +81,38 @@ void setup() {
   {
     // Setup windspeed array
     WindSpeedArray[i] = -1.0;
-  }    
+    WindDirectionArray[i] = 0;
+  }   
+  
+  Ethernet.init(10);
+  // start the Ethernet connection
+  Ethernet.begin(mac, ip);
+  
+  delay(2000);
+  
+     // Check for Ethernet hardware present
+  if (Ethernet.hardwareStatus() == EthernetNoHardware) {
+    Serial.println("Ethernet shield not found");
+    while (true) {
+      delay(1);
+    }
+  }
+  if (Ethernet.linkStatus() == LinkOFF) {
+    Serial.println("Ethernet cable is not connected.");
+  }  
+  
+  server.begin();
 }
 
 void loop() {
 
   SecondTimer.tick();
   MinuteTimer.tick();
+  
+  if (Client.available()) {
+    char c = Client.read();
+    Serial.print(c);
+  }
 
 }
 
@@ -120,12 +165,33 @@ float GetWindspeed() {
   return (CurrentWindSpeed);  
 }
 
-bool SecondElapsed(void *) {
-  UpdateBME();
+int GetWindDirection() {
+  unsigned int adc;
+
+  adc = analogRead(WDirPin);
+ // Serial.println(adc);
+
+  if (adc > 38 && adc < 42) return (90);
+  if (adc > 62 && adc < 70) return (135);
+  if (adc > 94 && adc < 100) return (180);
+  if (adc > 164 && adc < 170) return (45);
+  if (adc > 270 && adc < 275) return (225);
+  if (adc > 427 && adc < 430) return (0);
+  if (adc > 595 && adc < 599) return (315);
+  if (adc > 735 && adc < 742) return (270);
   
-  WindSpeedArray[Second] = GetWindspeed();  
+  return LastWindDirection; // error, disconnected?  
+}
+
+bool SecondElapsed(void *) {
+  UpdateBME();  
+  WindSpeedArray[Second] = GetWindspeed(); 
+  if (WindSpeedArray[Second] > WindGust) {
+    WindGust = WindSpeedArray[Second];
+  }
+  WindDirectionArray[Second] = GetWindDirection();
+  LastWindDirection = WindDirectionArray[Second];
   Second++;   
-  Serial.println("Tick!");
   return true;
 }
 
@@ -133,23 +199,98 @@ bool MinuteElapsed(void *) {
   Minute++;
   Second =  0;
   
-  // Average 60 seconds of wind events
+  // Average 60 seconds of wind events and directions
   float WindSpeedTotal = 0;
+  float WindDirectionTotal = 0;
   for (int i=0; i<60; i++) 
   {
     WindSpeedTotal += WindSpeedArray[i];
+    WindDirectionTotal += WindDirectionArray[i];
   }
   WindSpeed = WindSpeedTotal / 60;
-  Serial.print("Windspeed ");
+  if (WindSpeed < 0) { WindSpeed = 0; }
+  WindDirection = WindDirectionTotal / 60;
+ /* Serial.print("Windspeed ");
   Serial.println(WindSpeed);
+  Serial.print("WindDirection ");
+  Serial.println(WindDirection);  */
+  
+  WindGust = 0.0;
   
   if (Minute == 60) {
     // One hour has passed
     RainHour = 0.0;
     Minute = 0;
   }
-  Serial.print("Rain Minute ");
-  Serial.println(RainMinute);
+ /* Serial.print("Rain Minute ");
+  Serial.println(RainMinute); */
+  
+  UploadData();
   
   return true;
+}
+
+void UploadData() {
+  // Format URL to uploadd to wunderground
+  if ( Client.connect(UploadURL, 80) )
+  {
+    Serial.println("Connected to WUnderground");
+
+    Client.print("GET /weatherstation/updateweatherstation.php?ID=KINFORTW318&PASSWORD=Tfw37q2V&dateutc=now");
+  //  Client.print("&winddir=");
+  //  Client.print(WindDirection);
+ //   Client.print("&windspeed=");
+ //   Client.print((int)WindSpeed);
+ //   Client.print("&windgust=");
+ //   Client.print((int)WindGust);
+ //   Client.print("&humidity=");
+ //   Client.print((int)Humidity);
+ //   Client.print("&baromin=");
+ //   int OutPressure = Pressure * 0.00029530;
+ //   Client.print((int)OutPressure);
+ //   Client.print("&tempf=");
+ //   Client.print((int)TempF);
+ //   Client.print("&rainhour=");
+ //   Client.print((int)RainHour);
+ //  Client.print("&dewptf=");
+ //   Client.print((int)Dewpoint);
+ //   Client.print("&action=updateraw");      
+    Client.print("/ HTTP/1.1\r\nHost\: http://weatherstation.wunderground.com \r\nConnection\: close\r\n\r\n");
+    Client.print("\r\n\r\n\r\n");
+    Client.println();
+    Client.println();
+
+  } else { Serial.println("Connection failed"); }
+}
+
+void listenForEthernetClients() {
+  // listen for incoming clients
+  EthernetClient client = server.available();
+  if (client) {
+    Serial.println("Got a client");
+    // an http request ends with a blank line
+    bool currentLineIsBlank = true;
+    while (client.connected()) {
+      if (client.available()) {
+        char c = client.read();
+        if (c == '\n' && currentLineIsBlank) {
+          // send a standard http response header
+          client.println("HTTP/1.1 200 OK");
+          client.println("Content-Type: text/html");
+          client.println();
+          client.print("<h1>FNORD</h1>");       
+          break;
+        }
+        if (c == '\n') {
+          currentLineIsBlank = true;
+        } else if (c != '\r') {
+          currentLineIsBlank = false;
+        }
+      }
+    }
+    // give the web browser time to receive the data
+    delay(1);
+    // close the connection:
+    client.stop();
+  }
 }
