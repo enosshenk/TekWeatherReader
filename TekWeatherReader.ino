@@ -9,6 +9,7 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
 #include <arduino-timer.h>
+#include <ArduinoHttpClient.h>
 
 
 Adafruit_BME280 BME;
@@ -42,14 +43,12 @@ float Dewpoint = 0.0;     // Dewpoint in Farenheit
 float WindSpeed = 0.0;    // Wind speed MPH
 float WindGust = 0.0;
 
-float WindSpeedArray[60];
+float WindSpeedArray[60];       // Used to average values over a minute
 float WindDirectionArray[60];
 
+// URL for WUnderground
 char UploadURL[] = "weatherstation.wunderground.com";
 
-byte UploadIP[] = {
-  52, 22, 134, 222
-};
 // MAC address and IP for the Ethernet Shield, uses static IP on router
 byte mac[] = {
   0xAA, 0xBB, 0xCC, 0xDD, 0x23, 0x35
@@ -57,7 +56,9 @@ byte mac[] = {
 IPAddress ip(192, 168, 1, 23);
 
 EthernetServer server(80);
-EthernetClient Client;
+EthernetClient EClient;
+HttpClient Client = HttpClient(EClient, UploadURL, 80);
+
 
 
 void setup() {
@@ -108,11 +109,6 @@ void loop() {
 
   SecondTimer.tick();
   MinuteTimer.tick();
-  
-  if (Client.available()) {
-    char c = Client.read();
-    Serial.print(c);
-  }
 
 }
 
@@ -144,6 +140,7 @@ void WindIRQ() {
 }
 
 void RainIRQ() {
+  // Interrupt from rain bucket dumping
   if (millis() - LastRainTime > 10)
   {
     LastRainTime = millis();
@@ -169,7 +166,6 @@ int GetWindDirection() {
   unsigned int adc;
 
   adc = analogRead(WDirPin);
- // Serial.println(adc);
 
   if (adc > 38 && adc < 42) return (90);
   if (adc > 62 && adc < 70) return (135);
@@ -180,7 +176,7 @@ int GetWindDirection() {
   if (adc > 595 && adc < 599) return (315);
   if (adc > 735 && adc < 742) return (270);
   
-  return LastWindDirection; // error, disconnected?  
+  return LastWindDirection; // If all else fails send last second
 }
 
 bool SecondElapsed(void *) {
@@ -231,36 +227,37 @@ bool MinuteElapsed(void *) {
 }
 
 void UploadData() {
-  // Format URL to uploadd to wunderground
-  if ( Client.connect(UploadURL, 80) )
-  {
-    Serial.println("Connected to WUnderground");
+  // Sends data to Weather Underground
+  
+  // Convert pressure from Pa to InMG
+  int OutPressure = Pressure * 0.00029530; 
+  
+  // Build up GET request
+  String Request = "/weatherstation/updateweatherstation.php?ID=KINFORTW318&PASSWORD=Tfw37q2V&dateutc=now"
+  + String("&winddir=") + String(WindDirection)
+  + String("&windspeed=") + String(WindSpeed)
+  + String("&windgust=") + String(WindGust)
+  + String("&rainin=") + String(RainHour)
+  + String("&baroin=") + String(OutPressure)
+  + String("&humidity=") + String(Humidity)
+  + String("&tempf=") + String(TempF)
+  + String("&dewptf=") + String(Dewpoint)
+  + String("&action=updateraw");
+  
 
-    Client.print("GET /weatherstation/updateweatherstation.php?ID=KINFORTW318&PASSWORD=Tfw37q2V&dateutc=now");
-  //  Client.print("&winddir=");
-  //  Client.print(WindDirection);
- //   Client.print("&windspeed=");
- //   Client.print((int)WindSpeed);
- //   Client.print("&windgust=");
- //   Client.print((int)WindGust);
- //   Client.print("&humidity=");
- //   Client.print((int)Humidity);
- //   Client.print("&baromin=");
- //   int OutPressure = Pressure * 0.00029530;
- //   Client.print((int)OutPressure);
- //   Client.print("&tempf=");
- //   Client.print((int)TempF);
- //   Client.print("&rainhour=");
- //   Client.print((int)RainHour);
- //  Client.print("&dewptf=");
- //   Client.print((int)Dewpoint);
- //   Client.print("&action=updateraw");      
-    Client.print("/ HTTP/1.1\r\nHost\: http://weatherstation.wunderground.com \r\nConnection\: close\r\n\r\n");
-    Client.print("\r\n\r\n\r\n");
-    Client.println();
-    Client.println();
-
-  } else { Serial.println("Connection failed"); }
+  Serial.println(Request);
+  
+  // Send request
+  Client.get(Request);
+  
+  // read the status code and body of the response
+  int statusCode = Client.responseStatusCode();
+  String response = Client.responseBody();
+  Serial.print("Status code: ");
+  Serial.println(statusCode);
+  Serial.print("Response: ");
+  Serial.println(response); 
+  
 }
 
 void listenForEthernetClients() {
