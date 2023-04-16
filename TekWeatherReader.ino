@@ -15,6 +15,7 @@
 Adafruit_BME280 BME;
 auto SecondTimer = timer_create_default();
 auto MinuteTimer = timer_create_default();
+auto DayTimer = timer_create_default();
 
 // Pins
 const byte WSpeedPin = 3;
@@ -77,6 +78,7 @@ void setup() {
 
   SecondTimer.every(1000, SecondElapsed);
   MinuteTimer.every(60000, MinuteElapsed);
+  DayTimer.every(86400000, DayElapsed);
   
   for (int i=0; i<60; i++) 
   {
@@ -146,7 +148,8 @@ void RainIRQ() {
     LastRainTime = millis();
     RainTick++;
     RainMinute += 0.011;
-    RainHour += 0.11;    
+    RainHour += 0.011;    
+    RainDay += -0.011;
   }
 }
 
@@ -158,7 +161,7 @@ float GetWindspeed() {
   WindTick = 0;
   LastWind = millis();
   CurrentWindSpeed *= 1.492;
-
+//  Serial.println(CurrentWindSpeed);
   return (CurrentWindSpeed);  
 }
 
@@ -206,23 +209,33 @@ bool MinuteElapsed(void *) {
   WindSpeed = WindSpeedTotal / 60;
   if (WindSpeed < 0) { WindSpeed = 0; }
   WindDirection = WindDirectionTotal / 60;
- /* Serial.print("Windspeed ");
+  Serial.print("Windspeed ");
   Serial.println(WindSpeed);
+  Serial.print("Wind Gust ");
+  Serial.println(WindGust);
   Serial.print("WindDirection ");
-  Serial.println(WindDirection);  */
+  Serial.println(WindDirection);
+
+ /* Serial.print("Rain Minute ");
+  Serial.println(RainMinute); */
   
+  UploadData();
+
   WindGust = 0.0;
   
   if (Minute == 60) {
     // One hour has passed
     RainHour = 0.0;
     Minute = 0;
-  }
- /* Serial.print("Rain Minute ");
-  Serial.println(RainMinute); */
-  
-  UploadData();
-  
+  }  
+  return true;
+}
+
+bool DayElapsed(void *) {
+  // 24hr elapsed, clear rain accum
+  RainMinute = 0.0;
+  RainHour = 0.0;
+  RainDay = 0.0;
   return true;
 }
 
@@ -230,15 +243,16 @@ void UploadData() {
   // Sends data to Weather Underground
   
   // Convert pressure from Pa to InMG
-  int OutPressure = Pressure * 0.00029530; 
+  float OutPressure = Pressure * 0.00029530; 
   
   // Build up GET request
   String Request = "/weatherstation/updateweatherstation.php?ID=KINFORTW318&PASSWORD=Tfw37q2V&dateutc=now"
   + String("&winddir=") + String(WindDirection)
-  + String("&windspeed=") + String(WindSpeed)
-  + String("&windgust=") + String(WindGust)
+  + String("&windspeedmph=") + String(WindSpeed)
+  + String("&windgustmph=") + String(WindGust)
   + String("&rainin=") + String(RainHour)
-  + String("&baroin=") + String(OutPressure)
+  + String("&dailyrainin=") + String(RainDay)
+  + String("&baromin=") + String(OutPressure)
   + String("&humidity=") + String(Humidity)
   + String("&tempf=") + String(TempF)
   + String("&dewptf=") + String(Dewpoint)
