@@ -12,8 +12,8 @@
 #include <ArduinoHttpClient.h>
 
 
-Adafruit_BME280 BME;
-auto SecondTimer = timer_create_default();
+Adafruit_BME280 BME;                          // BME280 object
+auto SecondTimer = timer_create_default();    // Timer objects
 auto MinuteTimer = timer_create_default();
 auto DayTimer = timer_create_default();
 
@@ -56,15 +56,16 @@ byte mac[] = {
 };
 IPAddress ip(192, 168, 1, 23);
 
-EthernetServer server(80);
+EthernetServer server(80);      // Ethernet objects
 EthernetClient EClient;
-HttpClient Client = HttpClient(EClient, UploadURL, 80);
+HttpClient Client = HttpClient(EClient, UploadURL, 80);   // HTTPclient library to avoid WUnderground errors
 
 
 
 void setup() {
   Serial.begin(9600);
 
+  // Set up interrupt pins
   pinMode(WSpeedPin, INPUT_PULLUP);
   pinMode(RainPin, INPUT_PULLUP);  
  
@@ -76,13 +77,14 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(WSpeedPin), WindIRQ, FALLING);
   attachInterrupt(digitalPinToInterrupt(RainPin), RainIRQ, FALLING); 
 
+  // Initialize timers
   SecondTimer.every(1000, SecondElapsed);
   MinuteTimer.every(60000, MinuteElapsed);
   DayTimer.every(86400000, DayElapsed);
-  
+
+  // Setup windspeed array
   for (int i=0; i<60; i++) 
   {
-    // Setup windspeed array
     WindSpeedArray[i] = -1.0;
     WindDirectionArray[i] = 0;
   }   
@@ -109,8 +111,10 @@ void setup() {
 
 void loop() {
 
+  // All we do in loop is tick the timers
   SecondTimer.tick();
   MinuteTimer.tick();
+  DayTimer.tick();
 
 }
 
@@ -119,7 +123,7 @@ void UpdateBME() {
   Humidity = BME.readHumidity();
   Pressure = BME.readPressure();
   TempC = BME.readTemperature();
-  TempF = (TempC * 1.8) + 32;
+  TempF = (TempC * 1.8) + 32;       // Convert temp C to F
 
   float DewPointC = 0;
   if (TempC != 0 && Humidity != 0)
@@ -149,7 +153,7 @@ void RainIRQ() {
     RainTick++;
     RainMinute += 0.011;
     RainHour += 0.011;    
-    RainDay += -0.011;
+    RainDay += 0.011;
   }
 }
 
@@ -161,15 +165,14 @@ float GetWindspeed() {
   WindTick = 0;
   LastWind = millis();
   CurrentWindSpeed *= 1.492;
-//  Serial.println(CurrentWindSpeed);
   return (CurrentWindSpeed);  
 }
 
 int GetWindDirection() {
   unsigned int adc;
-
   adc = analogRead(WDirPin);
 
+  // Hacky shit found from trial and error
   if (adc > 38 && adc < 42) return (90);
   if (adc > 62 && adc < 70) return (135);
   if (adc > 94 && adc < 100) return (180);
@@ -183,18 +186,26 @@ int GetWindDirection() {
 }
 
 bool SecondElapsed(void *) {
+  // Executed every second
+
+  // Update BME values
   UpdateBME();  
+
+  // Check if this second's wind speed is greater than the gust value
   WindSpeedArray[Second] = GetWindspeed(); 
   if (WindSpeedArray[Second] > WindGust) {
     WindGust = WindSpeedArray[Second];
   }
   WindDirectionArray[Second] = GetWindDirection();
   LastWindDirection = WindDirectionArray[Second];
+
+  // Increment seconds variable probably not needed anymore
   Second++;   
   return true;
 }
 
 bool MinuteElapsed(void *) {
+  // Executes every 60 seconds
   Minute++;
   Second =  0;
   
@@ -209,20 +220,25 @@ bool MinuteElapsed(void *) {
   WindSpeed = WindSpeedTotal / 60;
   if (WindSpeed < 0) { WindSpeed = 0; }
   WindDirection = WindDirectionTotal / 60;
-  Serial.print("Windspeed ");
+
+  
+  /* Serial.print("Windspeed ");
   Serial.println(WindSpeed);
   Serial.print("Wind Gust ");
   Serial.println(WindGust);
   Serial.print("WindDirection ");
   Serial.println(WindDirection);
 
- /* Serial.print("Rain Minute ");
+  Serial.print("Rain Minute ");
   Serial.println(RainMinute); */
-  
+
+  // Every minute we call upload
   UploadData();
 
+  // Reset gust value
   WindGust = 0.0;
-  
+
+  // Reset rain counts for each hour
   if (Minute == 60) {
     // One hour has passed
     RainHour = 0.0;
