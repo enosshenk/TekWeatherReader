@@ -1,3 +1,5 @@
+
+
 // Tekventure Weather Sensor Reader
 // Arduino Mega w/ Arduino Ethernet Shield
 // Reads Sparkfun weather sensor mast and BME280 sensor
@@ -7,12 +9,16 @@
 #include <Ethernet.h>
 #include <SPI.h>
 #include <Adafruit_Sensor.h>
-#include <Adafruit_BME280.h>
+#include <Adafruit_BME680.h>
+#include <bme68x.h>
+#include <bme68x_defs.h>
 #include <arduino-timer.h>
 #include <ArduinoHttpClient.h>
+#include <SD.h>
 
+#define SEALEVELPRESSURE_HPA (1023.03)
 
-Adafruit_BME280 BME;                          // BME280 object
+Adafruit_BME680 BME;                          // BME680 object
 auto SecondTimer = timer_create_default();    // Timer objects
 auto MinuteTimer = timer_create_default();
 auto DayTimer = timer_create_default();
@@ -60,7 +66,7 @@ EthernetServer server(80);      // Ethernet objects
 EthernetClient EClient;
 HttpClient Client = HttpClient(EClient, UploadURL, 80);   // HTTPclient library to avoid WUnderground errors
 
-
+File LogFile;
 
 void setup() {
   Serial.begin(9600);
@@ -72,6 +78,10 @@ void setup() {
   // Start BME280
   BME.begin();
   SPI.begin();
+  BME.setTemperatureOversampling(BME680_OS_8X);
+  BME.setHumidityOversampling(BME680_OS_2X);
+  BME.setPressureOversampling(BME680_OS_4X);
+  BME.setIIRFilterSize(BME680_FILTER_SIZE_3); 
 
   // Interrupts
   attachInterrupt(digitalPinToInterrupt(WSpeedPin), WindIRQ, FALLING);
@@ -92,6 +102,11 @@ void setup() {
   Ethernet.init(10);
   // start the Ethernet connection
   Ethernet.begin(mac, ip);
+  
+  // Init SD Card
+  if (!SD.begin(4)) {
+    Serial.println("SD Init fail");
+  }
   
   delay(2000);
   
@@ -120,9 +135,14 @@ void loop() {
 
 void UpdateBME() {
   // Polls BME sensor and sets values
-  Humidity = BME.readHumidity();
-  Pressure = BME.readPressure();
-  TempC = BME.readTemperature();
+  
+  if (! BME.performReading()) {
+    Serial.println("Failed to perform BME reading :(");
+    return;
+  } 
+  Humidity = BME.humidity;
+  Pressure = BME.pressure;
+  TempC = BME.temperature;
   TempF = (TempC * 1.8) + 32;       // Convert temp C to F
 
   float DewPointC = 0;
@@ -259,7 +279,9 @@ void UploadData() {
   // Sends data to Weather Underground
   
   // Convert pressure from Pa to InMG
-  float OutPressure = Pressure * 0.00029530; 
+  float OutPressure = Pressure * 0.029530; 
+  
+  LogFile = SD.open("log.txt", FILE_WRITE);
   
   // Build up GET request
   String Request = "/weatherstation/updateweatherstation.php?ID=KINFORTW318&PASSWORD=Tfw37q2V&dateutc=now"
@@ -276,6 +298,10 @@ void UploadData() {
   
 
   Serial.println(Request);
+  if (LogFile) {
+    String LogData = millis() + " - " + Request;
+    LogFile.println(LogData);
+  }
   
   // Send request
   Client.get(Request);
@@ -288,6 +314,11 @@ void UploadData() {
   Serial.print("Response: ");
   Serial.println(response); 
   
+  if (LogFile) {
+    String LogData = millis() + " - Status Code: " + (String)statusCode + " - Response: " + (String)response;
+    LogFile.println(LogData);
+    LogFile.close();
+  }
 }
 
 void listenForEthernetClients() {
