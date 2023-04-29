@@ -5,9 +5,9 @@
 // Reads Sparkfun weather sensor mast and BME280 sensor
 
 // Includes
+#include <SPI.h>
 #include <Wire.h>
 #include <Ethernet.h>
-#include <SPI.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME680.h>
 #include <bme68x.h>
@@ -62,7 +62,7 @@ byte mac[] = {
 };
 IPAddress ip(192, 168, 1, 23);
 
-EthernetServer server(80);      // Ethernet objects
+//EthernetServer server(80);      // Ethernet objects
 EthernetClient EClient;
 HttpClient Client = HttpClient(EClient, UploadURL, 80);   // HTTPclient library to avoid WUnderground errors
 
@@ -101,7 +101,7 @@ void setup() {
   
   Ethernet.init(10);
   // start the Ethernet connection
-  Ethernet.begin(mac, ip);
+  Ethernet.begin(mac);
   
   // Init SD Card
   if (!SD.begin(4)) {
@@ -121,7 +121,7 @@ void setup() {
     Serial.println("Ethernet cable is not connected.");
   }  
   
-  server.begin();
+//  server.begin();
 }
 
 void loop() {
@@ -279,7 +279,7 @@ void UploadData() {
   // Sends data to Weather Underground
   
   // Convert pressure from Pa to InMG
-  float OutPressure = Pressure * 0.029530; 
+  float OutPressure = Pressure * 0.00029530; 
   
   LogFile = SD.open("log.txt", FILE_WRITE);
   
@@ -321,7 +321,7 @@ void UploadData() {
   }
 }
 
-void listenForEthernetClients() {
+/* void listenForEthernetClients() {
   // listen for incoming clients
   EthernetClient client = server.available();
   if (client) {
@@ -351,4 +351,4 @@ void listenForEthernetClients() {
     // close the connection:
     client.stop();
   }
-}
+} */
