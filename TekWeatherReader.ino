@@ -167,7 +167,7 @@ void WindIRQ() {
 
 void RainIRQ() {
   // Interrupt from rain bucket dumping
-  if (millis() - LastRainTime > 10)
+  if (millis() - LastRainTime > 30)
   {
     LastRainTime = millis();
     RainTick++;
@@ -304,7 +304,9 @@ void UploadData() {
   }
   
   // Send request
+  Client.beginRequest();
   Client.get(Request);
+  Client.endRequest();
   
   // read the status code and body of the response
   int statusCode = Client.responseStatusCode();
@@ -319,6 +321,8 @@ void UploadData() {
     LogFile.println(LogData);
     LogFile.close();
   }
+
+//  Client.close();
 }
 
 /* void listenForEthernetClients() {
