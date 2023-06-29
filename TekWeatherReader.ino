@@ -27,6 +27,7 @@ auto DayTimer = timer_create_default();
 const byte WSpeedPin = 3;
 const byte WDirPin = A0;
 const byte RainPin = 2;
+const byte ResetPin = 4;
 
 // Global Variables
 int LastWindTime = 0;
@@ -41,6 +42,7 @@ long LastWind = 0;
 float RainMinute = 0.0;
 float RainHour = 0.0;
 float RainDay = 0.0;
+int EthernetTryCount = 0;
 
 float Humidity = 0.0;     // Humidity in percent
 float TempF = 0.0;        // Temp in Farenheit
@@ -52,6 +54,9 @@ float WindGust = 0.0;
 
 float WindSpeedArray[60];       // Used to average values over a minute
 float WindDirectionArray[60];
+
+float TempArray[60];
+
 
 // URL for WUnderground
 char UploadURL[] = "weatherstation.wunderground.com";
@@ -74,14 +79,11 @@ void setup() {
   // Set up interrupt pins
   pinMode(WSpeedPin, INPUT_PULLUP);
   pinMode(RainPin, INPUT_PULLUP);  
+  pinMode(ResetPin, OUTPUT);
  
   // Start BME280
-  BME.begin();
   SPI.begin();
-  BME.setTemperatureOversampling(BME680_OS_8X);
-  BME.setHumidityOversampling(BME680_OS_2X);
-  BME.setPressureOversampling(BME680_OS_4X);
-  BME.setIIRFilterSize(BME680_FILTER_SIZE_3); 
+  BMEStart();
 
   // Interrupts
   attachInterrupt(digitalPinToInterrupt(WSpeedPin), WindIRQ, FALLING);
@@ -99,46 +101,49 @@ void setup() {
     WindDirectionArray[i] = 0;
   }   
   
-  Ethernet.init(10);
-  // start the Ethernet connection
-  Ethernet.begin(mac);
-  
-  // Init SD Card
-  if (!SD.begin(4)) {
-    Serial.println("SD Init fail");
-  }
-  
-  delay(2000);
-  
-     // Check for Ethernet hardware present
-  if (Ethernet.hardwareStatus() == EthernetNoHardware) {
-    Serial.println("Ethernet shield not found");
-    while (true) {
-      delay(1);
-    }
-  }
-  if (Ethernet.linkStatus() == LinkOFF) {
-    Serial.println("Ethernet cable is not connected.");
-  }  
-  
-//  server.begin();
+  InitEthernet();  
 }
 
 void loop() {
 
-  // All we do in loop is tick the timers
-  SecondTimer.tick();
-  MinuteTimer.tick();
-  DayTimer.tick();
+  // Check ethernet status
+  if (Ethernet.linkStatus() == LinkOFF) {
+    // Ethernet fucked off again
+    InitEthernet();
+  } else {
+    // Keep DCHP alive
+    Ethernet.maintain();
+    // All we do in loop is tick the timers
+    SecondTimer.tick();
+    MinuteTimer.tick();
+    DayTimer.tick();
+    }
+}
 
+void InitEthernet() {
+  // Connect ethernet
+  delay(500);
+  EthernetTryCount++;
+  Ethernet.init(10);
+  // start the Ethernet connection
+  Ethernet.begin(mac);  
+}
+
+void BMEStart() {
+  BME.begin();
+  BME.setTemperatureOversampling(BME680_OS_8X);
+  BME.setHumidityOversampling(BME680_OS_2X);
+  BME.setPressureOversampling(BME680_OS_4X);
+  BME.setIIRFilterSize(BME680_FILTER_SIZE_3); 
 }
 
 void UpdateBME() {
   // Polls BME sensor and sets values
   
   if (! BME.performReading()) {
-    Serial.println("Failed to perform BME reading :(");
     return;
+    // restart BME
+    BMEStart();
   } 
   Humidity = BME.humidity;
   Pressure = BME.pressure;
@@ -158,7 +163,7 @@ void UpdateBME() {
 
 void WindIRQ() {
   // Interrupt from the wind sensor ticking over
-  if (millis() - LastWindTime > 10)
+  if (millis() - LastWindTime > 30)
   {
     LastWindTime = millis();
     WindTick++;
@@ -209,7 +214,8 @@ bool SecondElapsed(void *) {
   // Executed every second
 
   // Update BME values
-  UpdateBME();  
+  UpdateBME();
+  TempArray[Second] == TempC;  
 
   // Check if this second's wind speed is greater than the gust value
   WindSpeedArray[Second] = GetWindspeed(); 
@@ -228,6 +234,9 @@ bool MinuteElapsed(void *) {
   // Executes every 60 seconds
   Minute++;
   Second =  0;
+
+  // Check BME data for sameness
+  int SameData = 0;
   
   // Average 60 seconds of wind events and directions
   float WindSpeedTotal = 0;
@@ -236,10 +245,16 @@ bool MinuteElapsed(void *) {
   {
     WindSpeedTotal += WindSpeedArray[i];
     WindDirectionTotal += WindDirectionArray[i];
+    if (TempArray[constrain(i, 0, 60)] == TempArray[i]) { SameData++; } 
   }
   WindSpeed = WindSpeedTotal / 60;
   if (WindSpeed < 0) { WindSpeed = 0; }
   WindDirection = WindDirectionTotal / 60;
+
+  if (SameData > 20) {
+    // restart BME
+    BMEStart();
+  }
 
   
   /* Serial.print("Windspeed ");
